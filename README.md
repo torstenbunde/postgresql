@@ -6,4 +6,5 @@ files:
 prepared_transactions.sql        SQL statement showing prepared transactions
 running_queries.sql              SQL statement showing running queries
 statements_and_locks.sql         SQL statement showing blocked statements
+ungranted_locks.sql              SQL statement showing number of ungranted locks
 users_connections.sql            SQL statement showing users and connections
