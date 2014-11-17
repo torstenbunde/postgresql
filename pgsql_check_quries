@@ -1,0 +1,28 @@
+#!/usr/bin/zsh
+
+# Script for checking number of active and running transactions.
+# If number > $threshold then write queries to tmp-file and send
+# information by mail.
+# Source: http://stackoverflow.com/questions/6081066/any-way-to-analyze-locks-after-the-fact
+
+threshold=20;
+dt=`date +%Y%m%d%H%M%S`;
+DATABASE="testdb";
+TMPFILE=/tmp/pg_stat_bk_$dt;
+MAILADDRESS="root@localhost";
+
+active=`/usr/bin/psql $DATABASE -Atc "SELECT COUNT(*) FROM pg_stat_activity WHERE current_query NOT ILIKE '%idle%';"`
+
+if [[ active -gt threshold ]]; then
+  echo "there are "$active" backends";
+  echo "creating backup for pg_stat as $TMPFILE";
+  psql $DATABASE -c "SELECT * FROM pg_stat_activity WHERE current_query NOT ILIKE '%idle%';" >$TMPFILE
+
+  ### Send mail
+  /usr/bin/mail -s "[DBLOAD] Running queries >= 20 Connections" $MAILADDRESS <$TMPFILE
+ 
+  ### Delete temporary files
+  /bin/rm -rf $TMPFILE
+fi
+
+# end of file
