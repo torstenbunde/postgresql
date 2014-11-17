@@ -1,0 +1,47 @@
+#!/bin/bash
+#
+# Script for exporting views from database dump files.
+#
+# Howto:
+# pg_dump -Fc -s -U <user> -d <database> -n <schema> -h <host> | pg_restore -l | grep "VIEWS" > view.out
+# Variables
+
+DUMPDIR=/var/local/pgbackup
+DUMPFILE=backup_$DATABASE.dump;
+PGRESTORE=/usr/bin/pg_restore
+DAYOFWEEK=`/bin/date +\%w`
+HOMEDIR=`pwd`
+
+# Check arguments
+if [ $# = 0 ]; then
+/bin/cat <<eof
+Usage: $0 <Database> <Schema>
+This script exports all views from all or a named schema
+from an PostgreSQL database dump file.
+The export will be put into the file "yourviews.sql"
+in the current directory!
+<Database> Name of the database
+<Schema> Name of the schema (or all for all schemas)
+eof
+exit 1;
+fi
+
+# Arguments
+DATABASE=$1
+SCHEMA=$2
+if [ "$SCHEMA" == "" ]; then
+echo "Please name schema or use 'all' for all schemas!";
+exit 1;
+fi
+
+if [ "$SCHEMA" != "all" ]; then
+`$PGRESTORE -n $SCHEMA -l $DUMPDIR/$DUMPFILE | /bin/grep VIEW >viewlist.txt`;
+else
+`$PGRESTORE -l $DUMPDIR/$DUMPFILE | /bin/grep VIEW >viewlist.txt`;
+fi
+`$PGRESTORE -L viewlist.txt $DUMPDIR/$DUMPFILE >yourviews.sql`
+echo "You'll find the exported functions file at $HOMEDIR/yourviews.sql"
+echo ""
+`/bin/rm -rf viewlist.txt`
+
+# end of file
