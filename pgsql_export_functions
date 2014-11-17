@@ -1,0 +1,52 @@
+#!/bin/bash
+#
+# Script for exporting functions from database dump files.
+#
+#	Howto:
+#	pg_dump -Fc -s -U <user> -d <database> -n <schema> -h <host> | pg_restore -l | grep "FUNCTION" > function.out
+
+# Variables
+DUMPDIR=/var/local/pgbackup
+PGRESTORE=/usr/bin/pg_restore
+DAYOFWEEK=`/bin/date +\%w`
+HOMEDIR=`pwd`
+
+# Check arguments
+if [ $# = 0 ]; then
+/bin/cat <<eof
+Usage: $0 <Database> <Schema>
+This script exports all functions from all or a named schema
+from an PostgreSQL database dump file.
+
+The export will be put into the file "yourfunctions.sql"
+in the current directory!
+
+<Database>	Name of the database
+<Schema>	Name of the schema (or all for all schemas)
+eof
+exit 1;
+fi
+
+# Arguments
+DATABASE=$1
+SCHEMA=$2
+
+if [ "$SCHEMA" == "" ]; then
+  echo "Please name schema or use 'all' for all schemas!";
+  exit 1;
+fi
+
+DUMPFILE=backup_$DATABASE.dump;
+
+if [ "$SCHEMA" != "all" ]; then
+  `$PGRESTORE -n $SCHEMA -l $DUMPDIR/$DUMPFILE | /bin/grep FUNCTION >functionlist.txt`;
+else
+  `$PGRESTORE -l $DUMPDIR/$DUMPFILE | /bin/grep FUNCTION >functionlist.txt`;
+fi
+
+`$PGRESTORE -L functionlist.txt $DUMPDIR/$DUMPFILE >yourfunctions.sql`
+echo "You'll find the exported functions file at $HOMEDIR/yourfunctions.sql"
+echo ""
+`/bin/rm -rf functionlist.txt`
+
+# end of file
