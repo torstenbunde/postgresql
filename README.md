@@ -6,7 +6,8 @@ files:
 grep_pid_log			Short shell script to grep all data from log file that belongs to a special pid.
 				usage: grep_pid_log <UID>
 pgsql_check_queries		Script for checking number of active and running transactions.
-pgsql_export_functions		Shell script for exporting functions von database dump files.
+pgsql_export_functions		Shell script for exporting functions from database dump files.
+pgsql_export_views		Shell script for exporting views from database dump files.
 prepared_transactions.sql       SQL statement showing prepared transactions
 running_queries.sql             SQL statement showing running queries
 statements_and_locks.sql        SQL statement showing blocked statements
