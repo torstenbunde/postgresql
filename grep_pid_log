@@ -1,0 +1,2 @@
+#!/bin/bash
+grep "postgres\[$1\]" /var/log/postregsql/postgresql-9.2-main.log
