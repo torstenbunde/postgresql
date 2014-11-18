@@ -1,0 +1,284 @@
+# Postgresql Memory Configuration and Sizing Script
+# By: James Morton
+# Last Updated 05/16/2012
+#
+# Note This script is meant to be used with by the postgres user with a configured .pgpass file
+# It is for Postgres version 9 running on Linux and only tested on Centos 5
+#
+# Reference - http://eee.postgresql.org/docs/9.1/static/kernel-resources.html
+#
+# This script should be run after changing any of the following in the postgresconf.sql
+#
+# maximum_connections
+# block_size
+# wal_block_size
+# wal_buffers
+# max_locks_per_transaction
+# max_prepared_transactions
+# shared_buffers
+#
+# or after changing the following OS kernel values
+#
+# SHMMAX
+# SHMALL
+# SHMMNI
+# SEMMNS
+# SEMMNI
+# SEMMSL
+
+#!/bin/bash
+
+#Input Variables
+DBNAME=$1
+USERNAME=$2
+
+
+clear
+echo
+echo "Postgresql Shared Memory Estimates"
+echo
+
+echo
+echo "Local Postgres Configuration settings"
+echo
+
+#Postgresql Version
+PSQL="psql "$DBNAME" -U "$USERNAME
+PG_VERSION=$($PSQL --version)
+echo "PG_VERSION:"$PG_VERSION
+
+#Postgresql Block Size
+PG_BLKSIZ=$($PSQL -t -c "show block_size;")
+echo "PG_BLKSIZ:"$PG_BLKSIZ
+
+#Maximum Connections
+PG_MAXCON=$($PSQL -t -c "show max_connections;")
+echo "PG_MAXCON:"$PG_MAXCON
+
+#Maximum Locks per Tansaction
+PG_MAXLPT=$($PSQL -t -c "show max_locks_per_transaction;")
+echo "PG_MAXLPT:"$PG_MAXLPT
+
+#Maximum Prepared Transactions, 2 phase commit, might not configured in postresql.conf let PG_MAXPRT=0
+PG_MAXPRT=$($PSQL -t -c "show max_prepared_transactions;")
+echo "PG_MAXPRT:"$PG_MAXPRT
+
+#Shared Buffers
+PG_SHABUF=$($PSQL -t -c "show shared_buffers;")
+PG_SHABUF=$(echo $PG_SHABUF | sed s/MB//)
+echo "PG_SHABUF:" $PG_SHABUF
+PG_SHABUF_IN_B=$(( $PG_SHABUF * 1024 * 1024 ))
+echo "PG_SHABUF_IN_B:"$PG_SHABUF_IN_B
+PG_SHABUF_NUMOFBUF=$(($PG_SHABUF_IN_B / $PG_BLKSIZ))
+echo "PG_SHABUF_NUMOFBUF:"$PG_SHABUF_NUMOFBUF
+
+#WAL Block Size
+PG_WALBLK=$($PSQL -t -c "show wal_block_size;")
+echo "PG_WALBLK:"$PG_WALBLK
+
+#WAL Buffers
+PG_WALBUF=$($PSQL -t -c "show wal_buffers;")
+PG_WALBUF=$(echo $PG_WALBUF | sed s/MB//)
+echo "PG_WALBUF:" $PG_WALBUF
+PG_WALBUF_IN_B=$(( $PG_WALBUF * 1024 * 1024 ))
+echo "PG_WALBUF_IN_B:"$PG_WALBUF_IN_B
+PG_WALBUF_NUMOFBUF=$(($PG_WALBUF_IN_B / $PG_WALBLK))
+echo "PG_WALBUF_NUMOFBUF:"$PG_WALBUF_NUMOFBUF
+
+#Autovacuum workers
+PG_ATVWRK=$($PSQL -t -c "show autovacuum_max_workers;")
+echo "PG_ATVWRK:"$PG_ATVWRK
+
+#maintainance_work_mem
+PG_MNTWKM=$($PSQL -t -c "show maintenance_work_mem;")
+PG_MNTWKM=$(echo $PG_MNTWKM | sed s/MB//)
+echo "PG_MNTWKM:"$PG_MNTWKM
+
+#effective_cache_size
+PG_EFCHSZ=$($PSQL -t -c "show effective_cache_size;")
+echo "PG_EFCHSZ:"$PG_EFCHSZ
+
+echo
+echo "OS Memory settings"
+echo
+
+PAGE_SIZE=$(getconf PAGE_SIZE)
+echo "PAGE_SIZE:"$PAGE_SIZE
+
+PHYS_PAGES=$(getconf _PHYS_PAGES)
+echo "PHYS_PAGES:"$PHYS_PAGES
+
+TOTAL_MEM_IN_MB=$(( ((PAGE_SIZE * PHYS_PAGES) / 1024) / 1024 ))
+echo "TOTAL_MEM_IN_MB:"$TOTAL_MEM_IN_MB
+
+echo
+echo "Current Kernel Shared Memory Settings"
+echo
+
+#get os mem settings into vars
+CUR_SHMMAX_IN_B=$(cat /proc/sys/kernel/shmmax)
+echo "CUR_SHMMAX_IN_B:"$CUR_SHMMAX_IN_B
+
+CUR_SHMMAX_IN_MB=$(( (CUR_SHMMAX_IN_B / 1024) / 1024 )) 
+echo "CUR_SHMMAX_IN_MB:"$CUR_SHMMAX_IN_MB
+
+CUR_SHMALL=$(cat /proc/sys/kernel/shmall)
+echo "CUR_SHMALL:" $CUR_SHMALL
+
+CUR_SHMALL_IN_MB=$(( (CUR_SHMALL / 1024) / 1024 ))
+echo "CUR_SHMALL_IN_MB:"$CUR_SHMALL_IN_MB
+
+CUR_SHMMNI=$(cat /proc/sys/kernel/shmmni)
+echo "CUR_SHMMNI:" $CUR_SHMMNI
+
+echo
+echo "Current Kernel Semaphore Settings"
+echo
+
+CUR_SEMMNI=$( cat /proc/sys/kernel/sem | awk '{print $4}' )
+echo "CUR_SEMMNI:"$CUR_SEMMNI
+
+CUR_SEMMNS=$( cat /proc/sys/kernel/sem | awk '{print $2}' )
+echo "CUR_SEMMNS:"$CUR_SEMMNS
+
+CUR_SEMMSL=$( cat /proc/sys/kernel/sem | awk '{print $1}' )
+echo "CUR_SEMMSL:"$CUR_SEMMSL
+
+PG_RECSET_SEMMNI=$(printf "%.0f" $(echo "scale=2;($PG_MAXCON+$PG_ATVWRK+4) / 16" | bc))
+echo "PG_RECSET_SEMMNI:"$PG_RECSET_SEMMNI
+
+PG_RECSET_SEMMNS=$(printf "%.0f" $(echo "scale=2;(($PG_MAXCON+$PG_ATVWRK+4) / 16)*17" | bc))
+echo "PG_RECSET_SEMMNS:"$PG_RECSET_SEMMNS
+
+echo
+echo "Estimate SHMMAX per Postgresql 9.1 Doc - Table 17-2"
+echo
+
+SHMMAX_MAXCON=$(( PG_MAXCON * (1800 + 270 * PG_MAXLPT)  ))
+echo "SHMMAX_MAXCON:"$SHMMAX_MAXCON
+
+SHMMAX_ATVWRK=$(( PG_ATVWRK * (1800 + 270 * PG_MAXLPT)  ))
+echo "SHMMAX_ATVWRK:"$SHMMAX_ATVWRK
+
+SHMMAX_MAXPRT=$(( PG_MAXPRT * (770 + 270 * PG_MAXLPT) )) 
+echo "SHMMAX_MAXPRT:"$SHMMAX_MAXPRT
+
+SHMMAX_SHABUF=$(( PG_SHABUF_NUMOFBUF * (PG_BLKSIZ + 208) ))
+echo "SHMMAX_SHABUF:"$SHMMAX_SHABUF
+
+SHMMAX_WALBUF=$(( PG_WALBUF_NUMOFBUF * (PG_WALBLK + 8) ))
+echo "SHMMAX_WALBUF:"$SHMMAX_WALBUF
+
+PG_REC_SHMMAX_TOTAL_B=$(( 788480 + SHMMAX_MAXCON + SHMMAX_ATVWRK +
+SHMMAX_MAXPRT + SHMMAX_SHABUF + SHMMAX_WALBUF  ))
+echo "PG_REC_SHMMAX_TOTAL_B:"$PG_REC_SHMMAX_TOTAL_B
+
+PG_REC_SHMMAX_TOTAL_MB=$(( (PG_REC_SHMMAX_TOTAL_B / 1024) / 1024 ))
+echo "PG_REC_SHMMAX_TOTAL_MB:"$PG_REC_SHMMAX_TOTAL_MB
+
+echo
+echo "-checking ipcs -m, postgres should be running" 
+CUR_IPCS_PG_SHAMEMSEG=$(ipcs -m | grep postgres | awk '{print $5}')
+CUR_IPCS_PG_SHAMEMSEG_MB=$(( $CUR_IPCS_PG_SHAMEMSEG / 1024 / 1024 ))
+echo "CUR_IPCS_PG_SHAMEMSEG_MB:" $CUR_IPCS_PG_SHAMEMSEG_MB "Should be equal or very close to the recommended SHMMAX"
+
+echo
+echo "Shared Memory Kernel Checks"
+echo
+
+#SHMMAX
+if [ "$PG_REC_SHMMAX_TOTAL_B" -lt "$CUR_SHMMAX_IN_B" ]; then
+	echo "SHMMAX is within Postgresql's needs"
+elif [ "$PG_REC_SHMMAX_TOTAL_B" -ge "$CUR_SHMMAX_IN_B" ]; then
+	echo "SHMMAX should be set greater than $PG_REC_SHMMAX_TOTAL_B"
+else
+	echo "SHHMAX setting cannot be determined"
+fi
+
+#SHMALL - note: SHMALL on CENTOS is in Bytes
+if [ "$PG_REC_SHMMAX_TOTAL_B" -lt "$CUR_SHMALL" ]; then
+	echo "SHMALL is within Postgresql's needs"
+elif [ "$PG_REC_SHMMAX_TOTAL_B" -ge "$CUR_SHMALL" ]; then
+	echo "SHMALL should be set greater than $PG_REC_SHMMAX_TOTAL_B"
+else
+	echo "SHMALL setting cannot be determined"
+fi
+
+#SHMMNI
+if [ "$CUR_SHMMNI" -ge 1 ]; then
+	echo "SHMMNI is within Postgresql's needs"
+elif [ "$CUR_SHMMNI" -lt 1 ]; then
+	echo "SHMMNI should be set greater than 1"
+else
+	echo "SHMMNI setting cannot be determined"
+fi
+
+#SEMMNI
+if [ "$CUR_SEMMNI" -ge "$PG_RECSET_SEMMNI" ]; then
+	echo "SEMMNI is within Postgresql's needs"
+elif [ "$CUR_SEMMNI" -lt "$PG_RECSET_SEMMNI" ]; then
+	echo "SEMMNI should be set greater than or equal to $PG_RECSET_SEMMNI"
+else
+	echo "SEMMNI setting cannot be determined"
+fi
+
+#SEMMNS
+if [ "$CUR_SEMMNS" -ge "$PG_RECSET_SEMMNS" ]; then
+	echo "SEMMNS is within Postgresql's needs"
+elif [ "$CUR_SEMMNS" -lt "$PG_RECSET_SEMMNS" ]; then
+	echo "SEMMNS should be set greater than or equal to $PG_RECSET_SEMMNS"
+else
+	echo "SEMMNS setting cannot be determined"
+fi
+
+
+#SEMMSL
+if [ "$CUR_SEMMSL" -ge 17 ]; then
+	echo "SEMMSL is within Postgresql's needs"
+elif [ "$CUR_SEMMSL" -lt 17 ]; then
+	echo "SEMMSL should be set greater than or equal to 17"
+else
+	echo "SEMMSL setting cannot be determined"
+fi
+
+
+echo
+echo "Estimate Total Memory Sizing"
+echo
+
+echo "Note: Postgres should be running for these numbers to be meaningful"
+echo
+
+echo $TOTAL_MEM_IN_MB "MB Total Physical System RAM"
+echo
+
+CUR_IPCS_SHAMEM=$(ipcs -m | grep postgres | awk '{print $5}')
+CUR_IPCS_SHAMEM_IN_MB=$(( $CUR_IPCS_SHAMEM / 1024 / 1024 ))
+#echo "CUR_IPCS_SHAMEM_IN_MB:"$CUR_IPCS_SHAMEM_IN_MB
+
+SHABUF_RECSET_IN_MB=$(printf "%.0f" $(echo "scale=2;$TOTAL_MEM_IN_MB*.25" | bc))
+#echo "SHABUF_RECSET_IN_MB:"$SHABUF_RECSET_IN_MB
+
+SHABUF_RECSET_IN_MB_MAX=$(printf "%.0f" $(echo "scale=2;$TOTAL_MEM_IN_MB*.4" | bc))
+#echo "SHABUF_RECSET_IN_MB_MAX:"$SHABUF_RECSET_IN_MB_MAX
+
+echo shared_buffers: $PG_SHABUF" MB current postgresql.conf setting"
+echo shared_buffers: $SHABUF_RECSET_IN_MB" MB Normal recomended setting (25% of Physical Ram)"
+echo shared_buffers: $SHABUF_RECSET_IN_MB_MAX" MB Agressive setting (40% of Physical Ram)"
+echo
+
+MNTWKM_RECSET_IN_MB=$(printf "%.0f" $(echo "scale=2;$TOTAL_MEM_IN_MB*.05" | bc))
+#echo "MNTWKM_RECSET_IN_MB:"$MNTWKM_RECSET_IN_MB
+
+echo maintainance_worker_mem: $PG_MNTWKM "MB current postgresql.conf setting"
+echo maintainance_worker_mem: $MNTWKM_RECSET_IN_MB "MB Normal recommended setting (5% of physical Ram)" 
+
+#OS_MEM_FREE=$(cat /proc/meminfo | grep MemFree | awk '{print $2}')
+#echo "OS_MEM_FREE:"$OS_MEM_FREE
+
+#OS_MEM_CACHED=$(cat /proc/meminfo | grep Cached | awk '{print $2}' | head -n1)
+#echo "OS_MEM_CACHED:"$OS_MEM_CACHED
+
+#EFCHSZ_RECSET=$(( (OS_MEM_FREE + OS_MEM_CACHED) / 1024 + PG_SHABUF ))
+
+#echo effective_cache_size:
