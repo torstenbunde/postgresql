@@ -9,6 +9,7 @@ pgsql_check_queries		Script for checking number of active and running transactio
 pgsql_export_functions		Shell script for exporting functions from database dump files.
 pgsql_export_sequences		Shell script for exporting sequences from database dump files.
 pgsql_export_views		Shell script for exporting views from database dump files.
+pgtop_query_sampling		Script showing query run times or send them by mail.
 postgres_mem			Postgresql Memory Configuration and Sizing Script.
 prepared_transactions.sql       SQL statement showing prepared transactions
 running_queries.sql             SQL statement showing running queries
