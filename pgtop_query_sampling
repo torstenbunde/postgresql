@@ -1,0 +1,217 @@
+#!/usr/bin/perl
+
+# Script showing query run times or send them by mail
+
+use DBI;
+use Data::Dumper;
+use Date::Format;
+use IO::Select;
+use MIME::Lite;
+use Getopt::Long;
+use strict;
+use Time::HiRes qw(time);
+use warnings;
+use YAML::Syck;
+
+my $sleep = 1;
+
+my %mailActions = ( qr( 00:) => sub { reportMail(); flushStats(); },
+		    qr( 06:) => sub { reportMail(); flushStats(); },
+	  	    qr( 12:) => sub { reportMail(); flushStats(); },
+		    qr( 18:) => sub { reportMail(); flushStats(); } );
+
+my $mail = 0;
+my $daemon = 0;
+my $pglogin = LoadFile('/usr/local/etc/pgserverconfig.yaml');
+
+my $optresult = GetOptions( "mail" => \$mail );
+if ( not $optresult ) {
+  die "usage: $0 [--mail]";
+}
+
+if ( $mail ) {
+  fork and exit 0;
+  close STDIN;
+  close STDOUT;
+  close STDERR;
+  fork and exit 0;
+  open STDIN, '<', '/dev/null' or die "cannot reopen STDIN: $!";
+  open STDOUT, '>>', '/dev/null' or die "cannot reopen STDOUT: $!";
+  open STDERR, '>>', '/dev/null' or die "cannot reopen STDERR: $!";
+}
+
+my $dbh = DBI->connect( "DBI:Pg:host=$pglogin->{'hostname'}; dbname=$pglogin->{'database'}",
+			"$pglogin->{'username'}",
+			"$pglogin->{'password'}",
+			{ AutoCommit => 1 } );
+
+my $statStart = time();
+my %stats;
+my %lockStats;
+my %active1;
+my %mailActionState;
+my $lastStat = time();
+
+while ( 1 ) {
+  select undef, undef, undef, $sleep;
+  my $rows = fetch();
+  my $locks = fetchLocks();
+  my $duration = time - $lastStat;
+  $lastStat = $duration + $lastStat;
+  my %active2;
+  foreach my $row ( @$rows ) {
+    next unless defined $row->{'query'};
+    next unless defined $row->{'age'};
+    next if( $row->{'state'} =~ /idle/i );
+    next if( $row->{'query'} =~ /pg_stat_activity/i );
+    my $id = $row->{'pid'} . '-' . $row->{'query_start'};
+    my $query = normalQuery( $row->{'query'} );
+    $stats{$query}->{'hits'} += $duration;
+    $stats{$query}->{'client'}->{$row->{'client_addr'} or 'none'} += $duration;
+    $stats{$query}->{'age_sum'} += $row->{'age'} * $duration;
+  }
+  %active1 = %active2;
+
+  foreach my $lock ( @$locks ) {
+    my $query = normalQuery( $lock->{'query'} );
+    my @idCols = qw(locktype database relname page tupe classid objid mode);
+    my $id = join ' ', map { $lock->{$_} or '-' } @idCols;
+    if ( ( $lock->{'locktype'} eq 'transactionid' ) or ( $lock->{'locktype'} eq 'virtualxid' ) ) {
+      $id .= ' ' . $query;
+    }
+    $lockStats{$id}->{'data'} = { map { ( $_, $lock->{$_} ) } @idCols };
+    $lockStats{$id}->{'hits'} += $duration;
+    $lockStats{$id}->{'query'}->{$query} += $duration;
+  }
+
+  if ( $mail ) {
+    my $time = time2str( '%Y-%m-%d %T', time() );
+    foreach my $mask ( keys %mailActions ) {
+      if ( $time =~ /$mask/ ) {
+        if ( not $mailActionState{$mask} ) {
+          &{$mailActions{$mask}}();
+        }
+        $mailActionState{$mask} = 1;
+      } else {
+        $mailActionState{$mask} = 0;
+      }
+    }
+  } else {
+    reportScreen();
+  }
+}
+
+sub reportScreen {
+  my $maxcount = 10;
+  my $lockMaxcount = 10;
+  my @queries = sort { $stats{$b}->{'hits'} <=> $stats{$a}->{'hits'} } keys %stats;
+  if ( @queries > $maxcount ) {
+    @queries = @queries[0 .. $maxcount];
+  }
+  print "\e[2J\e[1;1H";
+  print "===== Statistics from " . time2str( '%Y-%m-%d %T', $statStart ) . " to " . time2str( '%Y-%m-%d %T', time() ) . " =====\n";
+  foreach my $query ( @queries ) {
+    my ( $mainClient ) = sort { $stats{$query}->{'client'}->{$b} <=> $stats{$query}->{'client'}->{$a} } keys %{$stats{$query}->{'client'}};
+    print "==== "
+	. "Time: " . sprintf('%.1f s', $stats{$query}->{'hits'})
+	. " ==== "
+	. "Avg Duration: " . ( $stats{$query}->{'hits'}? sprintf( '%.1f ms', 1000 * $stats{$query}->{'age_sum'} * 2 / $stats{$query}->{'hits'} ): '???' )
+	. " ==== "
+	. "Main Client: " . $mainClient . " with " . sprintf( '%.1f s', $stats{$query}->{'client'}->{$mainClient} )
+	. " ====\n";
+    my $out = $query;
+    $out =~ s/[\n\t ]+/ /g;
+    print $out . "\n";
+  }
+  my @locks = sort { $lockStats{$b}->{'hits'} <=> $lockStats{$a}->{'hits'} } keys %lockStats;
+  if ( @locks > $lockMaxcount ) {
+    @locks = @locks[0 .. $lockMaxcount];
+  }
+  print "\n===== Locks =====\n";
+  foreach my $lock ( @locks ) {
+    my ( $mainQuery ) = sort { $lockStats{$lock}->{'query'}->{$b} <=> $lockStats{$lock}->{'query'}->{$a} } keys %{$lockStats{$lock}->{'query'}};
+    my $mainQueryOut = $mainQuery;
+    $mainQueryOut =~ s/[\n\t ]+/ /g;
+    print "Time: " . sprintf( '%.1f s', $lockStats{$lock}->{'hits'} ) . "; " .
+          "Locktype: " . ( $lockStats{$lock}->{'data'}->{'locktype'} or '?' ) . "; " .
+          "Relation: " . ( $lockStats{$lock}->{'data'}->{'relname'} or '?' ) . "; " .
+          "Mode: "     . ( $lockStats{$lock}->{'data'}->{'mode'} or '?' ) . "; " .
+          "Main Query with " . sprintf( '%.1f s', $lockStats{$lock}->{'query'}->{$mainQuery} ) . ": " . $mainQueryOut . "\n";
+  }
+}
+
+sub fetch {
+  my $sth = $dbh->prepare_cached( "SELECT *, EXTRACT(EPOCH FROM NOW() - query_start) AS age FROM pg_stat_activity" );
+  $sth->execute();
+  return $sth->fetchall_arrayref({});
+}
+
+sub fetchLocks {
+  my $sth = $dbh->prepare_cached( "SELECT l.*, r.relname, a.query FROM pg_locks l LEFT JOIN pg_class r ON r.oid = l.relation LEFT JOIN pg_stat_activity a ON a.pid = l.pid WHERE l.granted = 'f'" );
+  $sth->execute();
+  return $sth->fetchall_arrayref({});
+}
+
+sub reportMail {
+  my $maxcount = 30;
+  my $lockMaxcount = 30;
+  my @queries = sort { $stats{$b}->{'hits'} <=> $stats{$a}->{'hits'} } keys %stats;
+  if ( @queries > $maxcount ) {
+    @queries = @queries[0 .. $maxcount];
+  }
+  my $subject = "DB usage: " . time2str( '%Y-%m-%d %T', $statStart ) . " to " . time2str( '%Y-%m-%d %T', time() );
+  my $body = "";
+  foreach my $query ( @queries ) {
+    my ( $mainClient ) = sort { $stats{$query}->{'client'}->{$b} <=> $stats{$query}->{'client'}->{$a} } keys %{$stats{$query}->{'client'}};
+    $body .= "==== "
+    	. "Time: " . sprintf( '%.1f s', $stats{$query}->{'hits'} )
+	. " ==== "
+	. "Avg Duration: " . ( $stats{$query}->{'hits'}? sprintf( '%.1f ms', 1000 * $stats{$query}->{'age_sum'} * 2 / $stats{$query}->{'hits'} ): '???' )
+	. " ==== "
+	. "Main Client: " . $mainClient . " with " . sprintf( '%.1f s', $stats{$query}->{'client'}->{$mainClient} )
+	. " ====\n";
+    my $out = $query;
+    $out =~ s/[\n\t ]+/ /g;
+    $body .= $out . "\n\n";
+  }
+  my @locks = sort { $lockStats{$b}->{'hits'} <=> $lockStats{$a}->{'hits'} } keys %lockStats;
+  if ( @locks > $lockMaxcount ) {
+    @locks = @locks[0 .. $lockMaxcount];
+  }
+  $body .= "\n===== Locks =====\n";
+  foreach my $lock ( @locks ) {
+    my ( $mainQuery ) = sort { $lockStats{$lock}->{'query'}->{$b} <=> $lockStats{$lock}->{'query'}->{$a} } keys %{$lockStats{$lock}->{'query'}};
+    my $mainQueryOut = $mainQuery;
+    $mainQueryOut =~ s/[\n\t ]+/ /g;
+    $body .= "Time: " . sprintf( '%.1f s', $lockStats{$lock}->{'hits'} ) . "; "
+    	. "Locktype: " . ( $lockStats{$lock}->{'data'}->{'locktype'} or '?' ) . "; "
+	. "Relation: " . ( $lockStats{$lock}->{'data'}->{'relname'} or '?' ) . "; "
+	. "Mode: " . ( $lockStats{$lock}->{'data'}->{'mode'} or '?' ) . "; "
+	. "Main Query with " . sprintf( '%.1f s', $lockStats{$lock}->{'query'}->{$mainQuery} ) . ": " . $mainQueryOut . "\n";
+  }
+  my $msg = MIME::Lite->new( 'From'    => $pglogin->{'mail_from'},
+			     'To'      => $pglogin->{'mail_to'},
+			     'Subject' => $subject,
+			     'Type'    => 'text/plain',
+			     'Data'    => $body );
+  $msg->send();
+}
+
+sub flushStats {
+  $statStart = time();
+  %stats = ();
+  %lockStats = ();
+}
+
+sub normalQuery {
+  my ($query) = @_;
+  # assuming default setting of track_activity_query_size of 1024
+  if ( length $query == 1023 ) {
+    $query .= '...';
+  }
+  $query =~ s/\d+/.../g;
+  $query =~ s/'[^']*'/'...'/g;
+  return $query;
+}
+
+# end of file
