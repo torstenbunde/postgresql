@@ -5,6 +5,7 @@ Information, code and scripts for my daily work with PostgreSQL
 files:
 grep_pid_log			Short shell script to grep all data from log file that belongs to a special pid.
 				usage: grep_pid_log <UID>
+nonidle_processes.sql		Display nonidle postgres queries.
 pgsql_check_queries		Script for checking number of active and running transactions.
 pgsql_export_functions		Shell script for exporting functions from database dump files.
 pgsql_export_sequences		Shell script for exporting sequences from database dump files.
