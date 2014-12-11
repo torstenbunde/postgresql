@@ -15,6 +15,7 @@ pgsql_export_views		Shell script for exporting views from database dump files.
 pgtop_query_sampling		Script showing query run times or send them by mail.
 postgres_mem			Postgresql Memory Configuration and Sizing Script.
 prepared_transactions.sql       SQL statement showing prepared transactions
+roles_usernames.sql		Shows roles owned by users.
 running_queries.sql             SQL statement showing running queries
 sequence_lag.sql		SQL to find out which sequence number/s is/are missing in a table.
 statements_and_locks.sql        SQL statement showing blocked statements
