@@ -20,5 +20,6 @@ sequence_lag.sql		SQL to find out which sequence number/s is/are missing in a ta
 statements_and_locks.sql        SQL statement showing blocked statements
 stats_index_usage.sql           SQL statement for creating stats about index usage
 ungranted_locks.sql             SQL statement showing number of ungranted locks
+used_tablespaces.sql		Show used tablespaces.
 users_connections.sql           SQL statement showing users and connections
 write_performance.sql		Shows wrtite performance of tables.
