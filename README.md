@@ -7,6 +7,7 @@ buffer_cache_user_tables	Shows I/O statistics on user tables.
 does_column_exists.sql		Shows if a column exists or not.
 grep_pid_log			Short shell script to grep all data from log file that belongs to a special pid.
 				usage: grep_pid_log <UID>
+indexsizes.sql			Show index sizes.
 nonidle_processes.sql		Display nonidle postgres queries.
 pgsql_check_queries		Script for checking number of active and running transactions.
 pgsql_export_functions		Shell script for exporting functions from database dump files.
