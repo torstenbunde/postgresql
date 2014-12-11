@@ -3,6 +3,7 @@ postgresql
 Information, code and scripts for my daily work with PostgreSQL
 
 files:
+does_column_exists.sql		Shows if a column exists or not.
 grep_pid_log			Short shell script to grep all data from log file that belongs to a special pid.
 				usage: grep_pid_log <UID>
 nonidle_processes.sql		Display nonidle postgres queries.
